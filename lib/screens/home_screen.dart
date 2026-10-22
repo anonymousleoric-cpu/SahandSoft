@@ -184,7 +184,8 @@ class _HomePageState extends State<HomePage> {
         blockedApps: _blockedApps,
       );
       if (!mounted) return;
-      setState(() => _activeLabel = chosen.label);
+      final String activeLabel = chosen.label;
+      setState(() => _activeLabel = activeLabel);
 
       // 4) Read the real connected-server delay shortly after connecting.
       unawaited(
@@ -485,7 +486,7 @@ class _StatusLabel extends StatelessWidget {
   final String state;
   final bool busy;
 
-  (String, Color, bool) _resolve(SahandPalette palette) {
+  (String, Color, bool) _resolve(SahandPalette palette, BuildContext context) {
     switch (state) {
       case 'CONNECTED':
         return (context.tr('connected'), palette.success, false);
@@ -505,7 +506,7 @@ class _StatusLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     final SahandPalette palette = SahandPalette.of(context);
     final (String label, Color color, bool pulse) =
-        _resolve(palette);
+        _resolve(palette, context);
     return StatusPill(label: label, color: color, pulsing: pulse);
   }
 }

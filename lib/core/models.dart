@@ -30,7 +30,7 @@ class VpnProfile {
 
   VpnProfile copyWith({String? label, int? lastDelayMs}) => VpnProfile(
         id: id,
-        label: label,
+        label: label ?? this.label,
         uri: uri,
         source: source,
         lastDelayMs: lastDelayMs,
