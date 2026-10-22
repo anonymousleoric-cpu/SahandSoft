@@ -3,7 +3,6 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_v2ray/flutter_v2ray.dart';
-import 'package:flutter_v2ray/model/v2ray_status.dart';
 
 /// Thin, UI-independent wrapper around the flutter_v2ray engine.
 ///
