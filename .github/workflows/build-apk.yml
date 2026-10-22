@@ -1,5 +1,8 @@
 name: Build APK (SahandSoft)
 
+permissions:
+  contents: write # needed to publish GitHub Releases on tags
+
 on:
   workflow_dispatch:
   push:
