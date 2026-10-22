@@ -1,8 +1,8 @@
-dev_dependencies:
-  flutter_launcher_icons: "^0.13.1"
-
+# flutter_launcher_icons — SahandSoft
+# Run: dart run flutter_launcher_icons
 flutter_launcher_icons:
+  image_path: "assets/images/sahand_icon.png"
   android: "launcher_icon"
-  ios: false
-  image_path: "assets/images/logo.png"
-  min_sdk_android: 21 # android min sdk min:16, default 21
+  min_sdk_android: 21
+  adaptive_icon_background: "#0B1220"
+  adaptive_icon_foreground: "assets/images/sahand_icon.png"

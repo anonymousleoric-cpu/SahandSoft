@@ -1,89 +1,61 @@
 # Privacy Policy
 
-## Begzar VPN Privacy Policy
+## SahandSoft Privacy Policy
 
-Begzar Server only facilitates the provision and sharing of free VPN servers and does not collect any personal information or sensitive data except the ones mentioned in Section 1.2.
+**SahandSoft** is a local VPN client application. The app itself:
 
-> **Note 1:** Please always make sure to use official apps and follow this guide to verify the legitimacy and security of the website you are visiting while using Begzar VPN.
+- Does **not** collect, store, or transmit any personal information.
+- Does **not** include analytics, trackers, or advertising SDKs.
+- Stores VPN profiles, preferences, and excluded-app lists **only on your
+  device** (Android SharedPreferences).
+- The "Check exit IP" feature contacts the public service `freeipapi.com`
+  only when **you** tap it, to display your current public IP in a masked
+  form (e.g. `1.2.*.*.3`). No other data is sent.
+- Subscription URLs are fetched only when you add or refresh them.
 
-> **Note 2:** We strongly advise against using Begzar for sensitive tasks, such as banking or any activities that may be deemed illegal in your country, unless you are using a VPN configuration that you trust.
-
----
-
-## 1. Data Collection
-
-### 1.1 Data Not Collected
-We do **not** collect the following information:
-
-- Names (including subscriber names, usernames, and screen names)
-- Addresses (residential and business)
-- Telephone numbers
-- Payment details (credit card numbers, bank account info, billing records)
-
-### 1.2 Data Collected
-Limited anonymous data is collected to provide the best possible VPN configurations using the Mahsa Server:
-
-- IP Address of the Client (**first 3 octets only**)
-- Timezone of the Client
-- Android Version
-- App Version
-- Connection Status (Connected/Not Connected, Ping Value)
+> **Note:** When the VPN tunnel is active, your traffic is routed through
+> the server configured in **your** selected VPN profile. Use only configs
+> and subscription providers that you trust. Avoid sensitive tasks
+> (e.g. banking) on providers you do not trust.
 
 ---
 
-## 2. Data Usage
+## 1. Data We Do Not Collect
 
-Collected data is used for:
+- Names, emails, phone numbers, addresses
+- Payment details
+- Device identifiers, location, contacts
+- Usage statistics or crash reports
 
-- Maintaining a list of healthy and working donated VPN configurations.
-- A regional distribution algorithm that helps clients receive the best configurations based on their region and ISP.
+## 2. Data Stored on Your Device
 
----
+- VPN profiles you add (share-URIs)
+- Selected language, theme mode, selected profile
+- Excluded-app package names
 
-## 3. Data Sharing and Transfer
-We **do not** share any data with any third parties.
+This data never leaves your device unless you uninstall the app or manually
+export it.
 
----
+## 3. Third-Party Services
 
-## 4. Security Measures
-We implement strong security measures to protect collected data. Staff access is strictly limited.
+- `freeipapi.com` — optional, user-triggered public-IP lookup
+- Your own subscription provider — only when you import a subscription
 
----
+Use of third-party services while connected to a VPN server is subject to
+their policies.
 
-## 5. Data Retention
-Data is retained for legitimate business needs and is securely deleted when no longer needed.
+## 4. Data Deletion
 
----
+Uninstalling the app removes all locally stored data. For any question
+regarding data handling, contact the developer via Telegram:
+[@SahandSoft](https://t.me/SahandSoft).
 
-## 6. Right to Be Forgotten
-Data will be erased when:
+## 5. Upstream Note
 
-- It is no longer necessary for the purposes collected.
-- Consent is withdrawn (**via data removal request**).
-
----
-
-## 7. Third-Party Services
-Using third-party services while connected to Begzar VPN is subject to their privacy policies.
-
----
-
-## 8. Advertising
-- We **do not** receive any payment for the VPN configurations we provide.
-- We **do not** collect any data for advertisement purposes.
+This app is a redesigned derivative of the MIT-licensed BegzarApp project.
+The original project's server-side privacy policy applied to its own backend
+service, which is not part of this edition (see README).
 
 ---
 
-## 9. Children's Privacy
-We encourage parents to educate children about online privacy and responsible internet use.
-
----
-
-## 10. Data Deletion Request
-You can request data deletion by contacting our support via the following Telegram link:
-
-**[Data Deletion Request](#)**
-
----
-
-© 2025 Begzar VPN. All rights reserved.
+© 2025 SahandSoft — Daniel Afshari

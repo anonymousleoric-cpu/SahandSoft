@@ -1,338 +1,309 @@
 import 'package:dio/dio.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
-import 'package:lottie/lottie.dart';
 
-class VpnCard extends StatefulWidget {
+import '../theme/app_theme.dart';
+import '../theme/app_tokens.dart';
+import 'common/sahand_components.dart';
+
+/// ---------------------------------------------------------------------------
+/// VpnCard — live session statistics.
+/// ---------------------------------------------------------------------------
+/// Every value shown here comes from the real V2RayStatus stream or a real
+/// IP lookup; nothing is fabricated.
+class VpnCard extends StatelessWidget {
+  const VpnCard({
+    super.key,
+    required this.downloadSpeed,
+    required this.uploadSpeed,
+    required this.download,
+    required this.upload,
+    required this.selectedServer,
+    required this.duration,
+    this.delayMs,
+  });
+
   final int downloadSpeed;
   final int uploadSpeed;
-  final String selectedServer;
-  final String selectedServerLogo;
-  final String duration;
-
   final int download;
   final int upload;
+  final String selectedServer;
+  final String duration;
+  final int? delayMs;
 
-  const VpnCard(
-      {super.key,
-      required this.downloadSpeed,
-      required this.uploadSpeed,
-      required this.download,
-      required this.upload,
-      required this.selectedServer,
-      required this.selectedServerLogo,
-      required this.duration});
-
-  @override
-  State<VpnCard> createState() => _VpnCardState();
-}
-
-class _VpnCardState extends State<VpnCard> {
-  String? ipText;
-  String? ipflag;
-  bool isLoading = false;
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      clipBehavior: Clip.none,
-      alignment: Alignment.center,
+    final SahandPalette palette = SahandPalette.of(context);
+    return Column(
       children: [
-        Positioned(
-          top: -30,
-          child: Container(
-            width: 200,
-            height: 50,
-            decoration: BoxDecoration(
-              color: const Color(0xFF2A2A2A),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: Colors.grey.withOpacity(0.1),
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.2),
-                  blurRadius: 8,
-                  offset: Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Center(
-              child: Padding(
-                padding: const EdgeInsets.only(bottom: 16),
-                child: Text(
-                  widget.duration,
-                  style: TextStyle(
-                    color: Colors.grey[300],
-                    fontFamily: 'GM',
-                    fontSize: 18,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-        Container(
-          width: 350,
-          padding: EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: const Color(0xFF2A2A2A),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: Colors.grey.withOpacity(0.1),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.2),
-                blurRadius: 10,
-                offset: Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        // --- session banner -------------------------------------------------
+        SahandCard(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          child: Row(
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.start,
-                children: [
-                  Lottie.asset(
-                    widget.selectedServerLogo,
-                    width: 40,
-                  ),
-                  SizedBox(width: 12),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        widget.selectedServer,
-                        style: TextStyle(
-                          color: Colors.grey[300],
-                          fontFamily: 'GM',
-                          fontSize: 16,
-                        ),
-                      ),
-                      SizedBox(height: 8),
-                      _buildIpButton(),
-                    ],
-                  ),
-                ],
+              IconBadge(
+                icon: Icons.schedule_rounded,
+                color: palette.primary,
               ),
-              Divider(color: Colors.grey.withOpacity(0.1)),
-              Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 25, vertical: 10),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildStatColumn(
-                      icon: Icons.data_usage_rounded,
-                      download: formatBytes(widget.downloadSpeed),
-                      upload: formatBytes(widget.uploadSpeed),
-                      status: context.tr('realtime_usage'),
+                    Text(
+                      context.tr('session_duration'),
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: palette.muted),
                     ),
-                    _buildStatColumn(
-                      icon: Icons.wifi_rounded,
-                      download: formatSpeedBytes(widget.download),
-                      upload: formatSpeedBytes(widget.upload),
-                      status: context.tr('total_usage'),
+                    const SizedBox(height: 2),
+                    Text(
+                      duration,
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleLarge
+                          ?.copyWith(fontWeight: FontWeight.w700),
                     ),
                   ],
                 ),
               ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    context.tr('connected_server'),
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: palette.muted),
+                  ),
+                  const SizedBox(height: 2),
+                  _DelayChip(delayMs: delayMs),
+                ],
+              ),
             ],
           ),
         ),
+        const SizedBox(height: AppSpacing.md),
+        // --- throughput grid ------------------------------------------------
+        SahandCard(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          child: Column(
+            children: [
+              _StatRow(
+                icon: Icons.south_rounded,
+                iconColor: palette.success,
+                title: context.tr('download_speed'),
+                value: FormatUtils.speed(downloadSpeed),
+              ),
+              Divider(
+                height: AppSpacing.xl,
+                color: palette.outline,
+              ),
+              _StatRow(
+                icon: Icons.north_rounded,
+                iconColor: palette.primary,
+                title: context.tr('upload_speed'),
+                value: FormatUtils.speed(uploadSpeed),
+              ),
+              Divider(
+                height: AppSpacing.xl,
+                color: palette.outline,
+              ),
+              _StatRow(
+                icon: Icons.data_usage_rounded,
+                iconColor: palette.warning,
+                title: context.tr('total_usage'),
+                value:
+                    '${FormatUtils.bytes(download)}  ▾   ${FormatUtils.bytes(upload)}  ▴',
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        _IpCheckTile(serverLabel: selectedServer),
       ],
     );
   }
+}
 
-  String formatBytes(int bytes) {
-    if (bytes <= 0) return '0Byte';
+class _DelayChip extends StatelessWidget {
+  const _DelayChip({required this.delayMs});
 
-    const int kb = 1024;
-    const int mb = kb * 1024;
-    const int gb = mb * 1024;
+  final int? delayMs;
 
-    if (bytes < kb) return '$bytes Byte${bytes > 1 ? 's' : ''}';
-    if (bytes < mb) return '${(bytes / kb).toStringAsFixed(2)}KB';
-    if (bytes < gb) return '${(bytes / mb).toStringAsFixed(2)}MB';
-    return '${(bytes / gb).toStringAsFixed(2)}GB';
+  Color _color(SahandPalette palette) {
+    final int? ms = delayMs;
+    if (ms == null) return palette.muted;
+    if (ms < 0) return palette.danger;
+    if (ms < 300) return palette.success;
+    if (ms < 800) return palette.warning;
+    return palette.danger;
   }
 
-  String formatSpeedBytes(int bytes) {
-    if (bytes <= 0) return '0byte/s';
-
-    const int kb = 1024;
-    const int mb = kb * 1024;
-    const int gb = mb * 1024;
-
-    if (bytes < kb) return '${bytes}byte/s';
-    if (bytes < mb) return '${(bytes / kb).toStringAsFixed(2)}KB/s';
-    if (bytes < gb) return '${(bytes / mb).toStringAsFixed(2)}MB/s';
-    return '${(bytes / gb).toStringAsFixed(2)}GB/s';
-  }
-
-  Widget _buildIpButton() {
+  @override
+  Widget build(BuildContext context) {
+    final SahandPalette palette = SahandPalette.of(context);
     return Container(
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md, vertical: 6),
       decoration: BoxDecoration(
-        color: const Color(0xFF353535),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: Colors.white.withOpacity(0.1),
-        ),
+        color: _color(palette).withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(AppRadius.pill),
       ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: () async {
-            setState(() => isLoading = true);
-            final ipInfo = await getIpApi();
-            setState(() {
-              ipflag = countryCodeToFlagEmoji(ipInfo['countryCode']!);
-              ipText = ipInfo['ip'];
-              isLoading = false;
-            });
-          },
-          child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (isLoading)
-                  SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation(Colors.grey[400]),
-                    ),
-                  )
-                else ...[
-                  Text(
-                    ipText ?? context.tr('show_ip'),
-                    style: TextStyle(
-                      color: Colors.grey[300],
-                      fontFamily: 'GM',
-                      fontSize: 13,
-                    ),
-                  ),
-                  if (ipflag != null) ...[
-                    SizedBox(width: 6),
-                    Text(
-                      ipflag!,
-                      style: TextStyle(
-                        fontSize: 16,
-                      ),
-                    ),
-                  ],
-                ],
-              ],
-            ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.speed_rounded, size: 14, color: _color(palette)),
+          const SizedBox(width: 4),
+          Text(
+            FormatUtils.delayMs(delayMs),
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: _color(palette),
+                  fontWeight: FontWeight.w700,
+                ),
           ),
-        ),
+        ],
       ),
     );
   }
+}
 
-  Widget _buildStatColumn({
-    required IconData icon,
-    required String download,
-    required String upload,
-    required String status,
-  }) {
+class _StatRow extends StatelessWidget {
+  const _StatRow({
+    required this.icon,
+    required this.iconColor,
+    required this.title,
+    required this.value,
+  });
+
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final SahandPalette palette = SahandPalette.of(context);
     return Row(
       children: [
-        Icon(
-          icon,
-          color: Colors.green[400],
-          size: 20,
+        Icon(icon, color: iconColor, size: 20),
+        const SizedBox(width: AppSpacing.md),
+        Expanded(
+          child: Text(
+            title,
+            style: Theme.of(context)
+                .textTheme
+                .bodyMedium
+                ?.copyWith(color: palette.muted),
+          ),
         ),
-        SizedBox(width: 8),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              status,
-              style: TextStyle(fontSize: 12),
-            ),
-            SizedBox(height: 4),
-            Text(
-              "⬇️ $download",
-              style: TextStyle(
-                color: Colors.grey[300],
-                fontFamily: 'GM',
-                fontSize: 13,
-              ),
-            ),
-            Text(
-              "⬆️ $upload",
-              style: TextStyle(
-                color: Colors.grey[300],
-                fontFamily: 'GM',
-                fontSize: 13,
-              ),
-            ),
-          ],
+        Text(
+          value,
+          style: Theme.of(context)
+              .textTheme
+              .titleMedium
+              ?.copyWith(fontWeight: FontWeight.w700),
         ),
       ],
     );
   }
 }
 
-String countryCodeToFlagEmoji(String countryCode) {
-  countryCode = countryCode.toUpperCase();
-  final flag = countryCode.codeUnits
-      .map((codeUnit) => String.fromCharCode(0x1F1E6 + codeUnit - 0x41))
-      .join();
+class _IpCheckTile extends StatefulWidget {
+  const _IpCheckTile({required this.serverLabel});
 
-  return Text(
-        flag,
-        style: const TextStyle(
-          fontSize: 16,
-        ),
-      ).data ??
-      flag;
+  final String serverLabel;
+
+  @override
+  State<_IpCheckTile> createState() => _IpCheckTileState();
 }
 
-Future<Map<String, String>> getIpApi() async {
-  try {
-    final dio = Dio();
+class _IpCheckTileState extends State<_IpCheckTile> {
+  String? _ip;
+  String? _flag;
+  bool _loading = false;
 
-    final response = await dio.get(
-      'https://freeipapi.com/api/json',
-      options: Options(
-        headers: {
-          'X-Content-Type-Options': 'nosniff',
-        },
+  Future<void> _check() async {
+    setState(() => _loading = true);
+    try {
+      final Response<Map<String, dynamic>> response = await Dio()
+          .get<Map<String, dynamic>>(
+        'https://freeipapi.com/api/json',
+        options: Options(
+          headers: <String, String>{'X-Content-Type-Options': 'nosniff'},
+        ),
+      );
+      final Map<String, dynamic> data =
+          response.data ?? <String, dynamic>{};
+      String ip = (data['ipAddress'] ?? 'Unknown IP') as String;
+      // privacy: mask most of the address, same policy as upstream
+      if (ip.contains('.')) {
+        final List<String> parts = ip.split('.');
+        if (parts.length == 4) ip = '${parts[0]}.*.*.${parts[3]}';
+      } else if (ip.contains(':')) {
+        final List<String> parts = ip.split(':');
+        if (parts.length > 4) {
+          ip = '${parts[0]}:${parts[1]}:****:${parts.last}';
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        _ip = ip;
+        _flag = _flagEmoji((data['countryCode'] ?? '') as String);
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _ip = context.tr('ip_unknown');
+        _flag = null;
+        _loading = false;
+      });
+    }
+  }
+
+  String _flagEmoji(String countryCode) {
+    final String code = countryCode.toUpperCase();
+    if (code.length != 2) return '';
+    return code.codeUnits
+        .map((int unit) => String.fromCharCode(0x1F1E6 + unit - 0x41))
+        .join();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final SahandPalette palette = SahandPalette.of(context);
+    return SahandCard(
+      padding:
+          const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: 6),
+      child: ListTile(
+        contentPadding: EdgeInsets.zero,
+        onTap: _loading ? null : _check,
+        leading: IconBadge(
+          icon: Icons.public_rounded,
+          color: palette.primary,
+        ),
+        title: Text(
+          _ip ?? context.tr('show_ip'),
+          style: Theme.of(context).textTheme.titleSmall,
+        ),
+        subtitle: _flag == null
+            ? Text(
+                context.tr('ip_check_hint'),
+                style: Theme.of(context).textTheme.bodySmall,
+              )
+            : Text('$_flag  ${widget.serverLabel}',
+                style: Theme.of(context).textTheme.bodySmall),
+        trailing: _loading
+            ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : Icon(Icons.refresh_rounded, color: palette.muted),
       ),
     );
-
-    if (response.statusCode == 200) {
-      final data = response.data;
-      if (data != null && data is Map) {
-        String ip = data['ipAddress'] ?? 'Unknown IP';
-
-        if (ip.contains('.')) {
-          // IPv4
-          final parts = ip.split('.');
-          if (parts.length == 4) {
-            ip = '${parts[0]}.*.*.${parts[3]}';
-          }
-        } else if (ip.contains(':')) {
-          // IPv6
-          final parts = ip.split(':');
-          if (parts.length > 4) {
-            ip = '${parts[0]}:${parts[1]}:****:${parts.last}';
-          }
-        }
-
-        return {'countryCode': data['countryCode'] ?? 'Unknown', 'ip': ip};
-      }
-    }
-
-    return {'countryCode': 'Unknown', 'ip': 'Unknown IP'};
-  } catch (e) {
-    print('Error getting IP info: $e');
-    return {'countryCode': 'Error', 'ip': 'Error'};
   }
 }

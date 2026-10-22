@@ -1,670 +1,547 @@
 import 'dart:async';
-import 'dart:convert';
 
-import 'package:awesome_dialog/awesome_dialog.dart';
-import 'package:begzar/common/cha.dart';
-import 'package:begzar/common/http_client.dart';
-import 'package:begzar/common/secure_storage.dart';
-import 'package:begzar/widgets/connection_widget.dart';
-import 'package:begzar/widgets/server_selection_modal_widget.dart';
-import 'package:begzar/widgets/vpn_status.dart';
-import 'package:device_info_plus/device_info_plus.dart';
-import 'package:dio/dio.dart';
 import 'package:easy_localization/easy_localization.dart';
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_v2ray/flutter_v2ray.dart';
-import 'package:loading_animation_widget/loading_animation_widget.dart';
-import 'package:lottie/lottie.dart';
-import 'package:package_info_plus/package_info_plus.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
-import '../common/theme.dart';
+import 'package:flutter_v2ray/model/v2ray_status.dart';
 
+import '../core/config_repository.dart';
+import '../core/models.dart';
+import '../core/v2ray_service.dart';
+import '../theme/app_theme.dart';
+import '../theme/app_tokens.dart';
+import '../widgets/common/sahand_components.dart';
+import '../widgets/connection_widget.dart';
+import '../widgets/server_selection_modal_widget.dart';
+import '../widgets/vpn_status.dart';
+import 'servers_screen.dart';
+
+/// ---------------------------------------------------------------------------
+/// HomePage — the main connection screen.
+/// ---------------------------------------------------------------------------
+/// Connect flow (real functionality, no mock data):
+///  1. Profiles are loaded from ConfigRepository (user managed configs).
+///  2. On connect, every profile URI is parsed by the flutter_v2ray plugin,
+///     real delays are measured with getAllServerDelay and the fastest
+///     config is used (or the explicitly selected profile).
+///  3. The Android VPN permission dialog is requested, then startV2Ray
+///     starts the actual VPN service; UI state follows status callbacks.
 class HomePage extends StatefulWidget {
-  HomePage({super.key});
+  const HomePage({
+    super.key,
+    required this.service,
+    required this.repository,
+  });
+
+  final V2RayService service;
+  final ConfigRepository repository;
 
   @override
   State<HomePage> createState() => _HomePageState();
 }
 
 class _HomePageState extends State<HomePage> {
-  var v2rayStatus = ValueNotifier<V2RayStatus>(V2RayStatus());
-  late final FlutterV2ray flutterV2ray = FlutterV2ray(
-    onStatusChanged: (status) {
-      v2rayStatus.value = status;
-    },
-  );
-
-  bool proxyOnly = false;
-  List<String> bypassSubnets = [];
-  String? coreVersion;
-  String? versionName;
-  bool isLoading = false;
-  int? connectedServerDelay;
-  late SharedPreferences _prefs;
-  String selectedServer = 'Automatic';
-  String? selectedServerLogo;
-  String? domainName;
-  bool isFetchingPing = false;
-  List<String> blockedApps = [];
+  List<VpnProfile> _profiles = <VpnProfile>[];
+  String? _selectedProfileId; // null = Automatic (best latency)
+  bool _busy = false; // fetching configs / measuring delays
+  int? _connectedDelay;
+  String? _activeLabel;
+  List<String> _blockedApps = <String>[];
 
   @override
   void initState() {
     super.initState();
-    getVersionName();
-    _loadServerSelection();
-    flutterV2ray
-        .initializeV2Ray(
-      notificationIconResourceType: "mipmap",
-      notificationIconResourceName: "launcher_icon",
-    )
-        .then((value) async {
-      coreVersion = await flutterV2ray.getCoreVersion();
+    _loadState();
+  }
 
-      setState(() {});
-      Future.delayed(
-        Duration(seconds: 1),
-        () {
-          if (v2rayStatus.value.state == 'CONNECTED') {
-            delay();
-          }
-        },
-      );
+  Future<void> _loadState() async {
+    final List<VpnProfile> profiles =
+        await widget.repository.loadProfiles();
+    final String? selectedId =
+        await widget.repository.getSelectedProfileId();
+    final List<String> blockedApps =
+        await widget.repository.loadBlockedApps();
+    if (!mounted) return;
+    setState(() {
+      _profiles = profiles;
+      _selectedProfileId = selectedId;
+      _blockedApps = blockedApps;
+      _activeLabel = _labelFor(selectedId);
     });
+  }
+
+  String _labelFor(String? id) {
+    if (id == null) return context.tr('auto_select');
+    for (final VpnProfile p in _profiles) {
+      if (p.id == id) return p.label;
+    }
+    return context.tr('auto_select');
+  }
+
+  // ---- connect / disconnect ------------------------------------------------
+
+  Future<void> _handleConnectionTap(V2RayStatus status) async {
+    if (status.state == 'CONNECTED' || status.state == 'DISCONNECTING') {
+      await _disconnect();
+    } else if (status.state == 'DISCONNECTED') {
+      await _connect();
+    }
+  }
+
+  Future<void> _disconnect() async {
+    try {
+      await widget.service.stop();
+    } catch (e) {
+      debugPrint('disconnect failed: $e');
+    }
+    if (!mounted) return;
+    setState(() {
+      _connectedDelay = null;
+    });
+  }
+
+  Future<void> _connect() async {
+    if (_busy) return;
+
+    final List<VpnProfile> profiles =
+        await widget.repository.loadProfiles();
+    if (!mounted) return;
+    if (profiles.isEmpty) {
+      _promptNoProfiles();
+      return;
+    }
+
+    setState(() => _busy = true);
+
+    try {
+      // 1) Parse URIs into full Xray configs via the plugin (real parser).
+      final Map<String, VpnProfile> configToProfile =
+          <String, VpnProfile>{};
+      for (final VpnProfile p in profiles) {
+        try {
+          final String full = widget.service.fullConfigFromUri(p.uri);
+          configToProfile[full] = p;
+        } catch (e) {
+          debugPrint('skip unparsable profile ${p.id}: $e');
+        }
+      }
+      if (configToProfile.isEmpty) {
+        _showError(context.tr('error_invalid_profiles'));
+        return;
+      }
+
+      // 2) Choose config: selected profile or best measured delay.
+      String bestConfig = '';
+      VpnProfile? chosen;
+      final VpnProfile? explicit = _selectedProfileId == null
+          ? null
+          : configToProfile.values
+              .where((VpnProfile p) => p.id == _selectedProfileId)
+              .firstOrNull;
+      if (explicit != null) {
+        bestConfig = configToProfile.keys
+            .firstWhere((String k) => configToProfile[k] == explicit);
+        chosen = explicit;
+      } else {
+        final Map<String, int> delays =
+            await widget.service.allDelays(configToProfile.keys.toList());
+        int minDelay = 1 << 30;
+        delays.forEach((String config, int delay) {
+          if (delay >= 0 && delay < minDelay) {
+            minDelay = delay;
+            bestConfig = config;
+          }
+        });
+        chosen = configToProfile[bestConfig];
+        // persist real measured delays for the picker UI
+        for (final MapEntry<String, int> entry in delays.entries) {
+          final VpnProfile? profile = configToProfile[entry.key];
+          if (profile != null) {
+            await widget.repository
+                .updateDelay(profile.id, entry.value);
+          }
+        }
+        if (chosen != null) {
+          await widget.repository.updateDelay(chosen.id, minDelay);
+        }
+      }
+
+      if (bestConfig.isEmpty || chosen == null) {
+        _showError(context.tr('error_no_server_connected'));
+        return;
+      }
+
+      // 3) Ask for the Android VPN permission, then start the service.
+      final bool granted = await widget.service.requestPermission();
+      if (!granted) {
+        _showError(context.tr('error_permission'));
+        return;
+      }
+      widget.service.notificationDisconnectLabel =
+          context.tr('disconnect_btn');
+      await widget.service.start(
+        remark: context.tr('app_title'),
+        config: bestConfig,
+        blockedApps: _blockedApps,
+      );
+      if (!mounted) return;
+      setState(() => _activeLabel = chosen.label);
+
+      // 4) Read the real connected-server delay shortly after connecting.
+      unawaited(
+        Future<void>.delayed(const Duration(seconds: 2), () async {
+          if (widget.service.state != 'CONNECTED') return;
+          final int? delay =
+              await widget.service.connectedDelay();
+          if (delay != null && mounted) {
+            setState(() => _connectedDelay = delay);
+          }
+        }),
+      );
+    } on TimeoutException {
+      _showError(context.tr('error_timeout'));
+    } catch (e) {
+      debugPrint('connect failed: $e');
+      _showError(context.tr('error_connect'));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _promptNoProfiles() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (BuildContext sheetContext) {
+        return Padding(
+          padding: const EdgeInsets.all(AppSpacing.xl),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const IconBadge(
+                icon: Icons.add_link_rounded,
+                color: AppColors.brandBright,
+                size: 56,
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              Text(
+                context.tr('empty_profiles_title'),
+                style: Theme.of(sheetContext)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                context.tr('empty_profiles_body'),
+                textAlign: TextAlign.center,
+                style: Theme.of(sheetContext).textTheme.bodySmall,
+              ),
+              const SizedBox(height: AppSpacing.xl),
+              FilledButton.icon(
+                onPressed: () {
+                  Navigator.of(sheetContext).pop();
+                  _goToServers();
+                },
+                icon: const Icon(Icons.add_link_rounded, size: 18),
+                label: Text(context.tr('add_first_config')),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _goToServers() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (BuildContext context) => ServersScreen(
+          service: widget.service,
+          repository: widget.repository,
+          onProfilesChanged: _loadState,
+        ),
+      ),
+    );
+  }
+
+  void _showError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  // ---- server picker ---------------------------------------------------------
+
+  Future<void> _showServerSelectionModal() async {
+    if (widget.service.state == 'CONNECTED' ||
+        widget.service.state == 'CONNECTING' ||
+        widget.service.state == 'DISCONNECTING') {
+      _showError(context.tr('error_change_server'));
+      return;
+    }
+    final List<VpnProfile> profiles =
+        await widget.repository.loadProfiles();
+    if (!mounted) return;
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (BuildContext sheetContext) {
+        return ServerSelectionModal(
+          profiles: profiles,
+          selectedId: _selectedProfileId,
+          onProfileSelected: (String? id) {
+            Navigator.of(sheetContext).pop();
+            setState(() => _selectedProfileId = id);
+            widget.repository.setSelectedProfileId(id);
+          },
+          onManageProfiles: () {
+            Navigator.of(sheetContext).pop();
+            _goToServers();
+          },
+        );
+      },
+    );
+  }
+
+  // ---- build -----------------------------------------------------------------
+
+  @override
+  Widget build(BuildContext context) {
+    final SahandPalette palette = SahandPalette.of(context);
+    return Scaffold(
+      body: SafeArea(
+        child: RefreshIndicator(
+          onRefresh: _loadState,
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            children: [
+              _Header(
+                activeLabel: _activeLabel ?? context.tr('auto_select'),
+                onServerTap: _showServerSelectionModal,
+              ),
+              const SizedBox(height: AppSpacing.xl),
+              ValueListenableBuilder<V2RayStatus>(
+                valueListenable: widget.service.status,
+                builder: (BuildContext context, V2RayStatus value, _) {
+                  final bool connected = value.state == 'CONNECTED';
+                  return Column(
+                    children: [
+                      Center(
+                        child: ConnectionWidget(
+                          onTap: () => _handleConnectionTap(value),
+                          isLoading: _busy,
+                          status: value.state,
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.xl),
+                      _StatusLabel(state: value.state, busy: _busy),
+                      const SizedBox(height: AppSpacing.xl),
+                      AnimatedSwitcher(
+                        duration: AppDurations.slow,
+                        switchInCurve: Curves.easeOutCubic,
+                        switchOutCurve: Curves.easeInCubic,
+                        child: connected
+                            ? Column(
+                                key: const ValueKey<String>('stats'),
+                                children: <Widget>[
+                                  VpnCard(
+                                    downloadSpeed: value.downloadSpeed,
+                                    uploadSpeed: value.uploadSpeed,
+                                    download: value.download,
+                                    upload: value.upload,
+                                    selectedServer:
+                                        _activeLabel ?? context.tr('auto_select'),
+                                    duration: value.duration,
+                                    delayMs: _connectedDelay,
+                                  ),
+                                ],
+                              )
+                            : _IdleHint(
+                                key: const ValueKey<String>('idle'),
+                                hasProfiles: _profiles.isNotEmpty,
+                              ),
+                      ),
+                    ],
+                  );
+                },
+              ),
+              const SizedBox(height: AppSpacing.huge),
+              Center(
+                child: Text(
+                  context.tr('core_hint'),
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: palette.muted),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Top header: brand + active server selector card.
+class _Header extends StatelessWidget {
+  const _Header({
+    required this.activeLabel,
+    required this.onServerTap,
+  });
+
+  final String activeLabel;
+  final VoidCallback onServerTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final SahandPalette palette = SahandPalette.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            const SahandLogo(size: 44),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: Text(
+                context.tr('app_title'),
+                style: Theme.of(context)
+                    .textTheme
+                    .headlineSmall
+                    ?.copyWith(fontWeight: FontWeight.w700),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.lg),
+        Material(
+          color: palette.surface,
+          borderRadius: BorderRadius.circular(AppRadius.lg),
+          child: InkWell(
+            onTap: onServerTap,
+            borderRadius: BorderRadius.circular(AppRadius.lg),
+            child: Container(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(AppRadius.lg),
+                border: Border.all(color: palette.outline),
+              ),
+              child: Row(
+                children: [
+                  IconBadge(
+                    icon: Icons.dns_rounded,
+                    color: palette.primary,
+                  ),
+                  const SizedBox(width: AppSpacing.md),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          context.tr('active_server'),
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(color: palette.muted),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          activeLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    Icons.unfold_more_rounded,
+                    color: palette.muted,
+                    size: 20,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Status line under the button — mirrors the real service state.
+class _StatusLabel extends StatelessWidget {
+  const _StatusLabel({required this.state, required this.busy});
+
+  final String state;
+  final bool busy;
+
+  (String, Color, bool) _resolve(SahandPalette palette) {
+    switch (state) {
+      case 'CONNECTED':
+        return (context.tr('connected'), palette.success, false);
+      case 'CONNECTING':
+        return (context.tr('connecting'), palette.warning, true);
+      case 'DISCONNECTING':
+        return (context.tr('disconnecting'), palette.warning, true);
+      default:
+        if (busy) {
+          return (context.tr('preparing'), palette.warning, true);
+        }
+        return (context.tr('disconnected'), palette.idle, false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.sizeOf(context);
-    final bool isWideScreen = size.width > 600;
-
-    return Scaffold(
-      appBar: isWideScreen ? null : _buildAppBar(isWideScreen),
-      backgroundColor: const Color(0xff192028),
-      body: SafeArea(
-        child: Column(
-          children: [
-            GestureDetector(
-              onTap: () => _showServerSelectionModal(context),
-              child: Container(
-                margin: const EdgeInsets.all(16),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF2A2A2A),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.grey.withOpacity(0.1)),
-                ),
-                child: Row(
-                  children: [
-                    Lottie.asset(
-                      selectedServerLogo ?? 'assets/lottie/auto.json',
-                      width: 24,
-                      height: 24,
-                    ),
-                    const SizedBox(width: 12),
-                    Text(
-                      selectedServer,
-                      style: TextStyle(
-                        color: Colors.grey[300],
-                        fontSize: 16,
-                        fontFamily: 'GM',
-                      ),
-                    ),
-                    const Spacer(),
-                    Icon(Icons.keyboard_arrow_down, color: Colors.grey[400]),
-                  ],
-                ),
-              ),
-            ),
-            Expanded(
-              child: Center(
-                child: ValueListenableBuilder(
-                  valueListenable: v2rayStatus,
-                  builder: (context, value, child) {
-                    final size = MediaQuery.sizeOf(context);
-                    final bool isWideScreen = size.width > 600;
-                    return isWideScreen
-                        ? Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceEvenly,
-                                children: [
-                                  Expanded(
-                                    child: Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        ConnectionWidget(
-                                          onTap: () =>
-                                              _handleConnectionTap(value),
-                                          isLoading: isLoading,
-                                          status: value.state,
-                                        ),
-                                        if (value.state == 'CONNECTED') ...[
-                                          const SizedBox(height: 16),
-                                          _buildDelayIndicator(),
-                                        ],
-                                      ],
-                                    ),
-                                  ),
-                                  if (value.state == 'CONNECTED') ...[
-                                    Expanded(
-                                      child: VpnCard(
-                                        download: value.download,
-                                        upload: value.upload,
-                                        downloadSpeed: value.downloadSpeed,
-                                        uploadSpeed: value.uploadSpeed,
-                                        selectedServer: selectedServer,
-                                        selectedServerLogo:
-                                            selectedServerLogo ??
-                                                'assets/lottie/auto.json',
-                                        duration: value.duration,
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ],
-                          )
-                        : Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              ConnectionWidget(
-                                onTap: () => _handleConnectionTap(value),
-                                isLoading: isLoading,
-                                status: value.state,
-                              ),
-                              if (value.state == 'CONNECTED') ...[
-                                const SizedBox(height: 16),
-                                _buildDelayIndicator(),
-                                const SizedBox(height: 60),
-                                VpnCard(
-                                  download: value.download,
-                                  upload: value.upload,
-                                  downloadSpeed: value.downloadSpeed,
-                                  uploadSpeed: value.uploadSpeed,
-                                  selectedServer: selectedServer,
-                                  selectedServerLogo: selectedServerLogo ??
-                                      'assets/lottie/auto.json',
-                                  duration: value.duration,
-                                ),
-                              ],
-                            ],
-                          );
-                  },
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    final SahandPalette palette = SahandPalette.of(context);
+    final (String label, Color color, bool pulse) =
+        _resolve(palette);
+    return StatusPill(label: label, color: color, pulsing: pulse);
   }
+}
 
-  PreferredSizeWidget _buildAppBar(bool isWideScreen) {
-    return AppBar(
-      title: Text(
-        context.tr('app_title'),
-        style: TextStyle(
-          color: ThemeColor.foregroundColor,
-          fontSize: isWideScreen ? 22 : 18,
-        ),
-      ),
-      actions: [
-        Padding(
-          padding: const EdgeInsets.all(8.0),
-          child: Image.asset(
-            'assets/images/logo_transparent.png',
-            color: ThemeColor.foregroundColor,
-            height: 50,
+/// Shown when disconnected: guidance instead of fake stats.
+class _IdleHint extends StatelessWidget {
+  const _IdleHint({super.key, required this.hasProfiles});
+
+  final bool hasProfiles;
+
+  @override
+  Widget build(BuildContext context) {
+    final SahandPalette palette = SahandPalette.of(context);
+    return SahandCard(
+      child: Row(
+        children: [
+          IconBadge(
+            icon: hasProfiles
+                ? Icons.shield_outlined
+                : Icons.info_outline_rounded,
+            color: palette.muted,
           ),
-        ),
-      ],
-      automaticallyImplyLeading: !isWideScreen,
-      centerTitle: true,
-      backgroundColor: ThemeColor.backgroundColor,
-      elevation: 0,
-    );
-  }
-
-  Widget _buildDelayIndicator() {
-    return Container(
-      margin: const EdgeInsets.only(top: 0),
-      width: connectedServerDelay == null ? 50 : 90,
-      height: 30,
-      child: Center(
-        child: connectedServerDelay == null
-            ? LoadingAnimationWidget.fallingDot(
-                color: const Color.fromARGB(255, 214, 182, 0),
-                size: 35,
-              )
-            : _buildDelayDisplay(),
-      ),
-    );
-  }
-
-  Widget _buildDelayDisplay() {
-    return SizedBox(
-      height: 50,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: delay,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(CupertinoIcons.wifi, color: Colors.white, size: 16),
-            const SizedBox(width: 8),
-            Text(
-              connectedServerDelay.toString(),
-              style: TextStyle(fontFamily: 'GM'),
-            ),
-            const SizedBox(width: 4),
-            const Text('ms'),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _handleConnectionTap(V2RayStatus value) async {
-    if (value.state == "DISCONNECTED") {
-      getDomain();
-      // initKey();
-    } else {
-      flutterV2ray.stopV2Ray();
-    }
-  }
-
-  void _showServerSelectionModal(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(25.0)),
-      ),
-      builder: (BuildContext context) {
-        return ServerSelectionModal(
-          selectedServer: selectedServer,
-          onServerSelected: (server) {
-            if (v2rayStatus.value.state == "DISCONNECTED") {
-              String? logoPath;
-              if (server == 'Automatic') {
-                logoPath = 'assets/lottie/auto.json';
-              } else if (server == 'Server 1') {
-                logoPath = 'assets/lottie/server.json';
-              } else if (server == 'Server 2') {
-                logoPath = 'assets/lottie/server.json';
-              }
-              setState(() {
-                selectedServer = server;
-              });
-              _saveServerSelection(server, logoPath!);
-              Navigator.pop(context);
-            } else {
-              if (mounted) {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      context.tr('error_change_server'),
-                    ),
-                    behavior: SnackBarBehavior.floating,
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Text(
+              hasProfiles
+                  ? context.tr('idle_hint_ready')
+                  : context.tr('idle_hint_empty'),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    height: 1.7,
+                    color: palette.muted,
                   ),
-                );
-              }
-            }
-          },
-        );
-      },
+            ),
+          ),
+        ],
+      ),
     );
-  }
-
-  String getServerParam() {
-    if (selectedServer == 'Server 1') {
-      return 'server_1';
-    } else if (selectedServer == 'Server 2') {
-      return 'server_2';
-    } else {
-      return 'auto';
-    }
-  }
-
-  Future<void> _loadServerSelection() async {
-    _prefs = await SharedPreferences.getInstance();
-    setState(() {
-      selectedServer = _prefs.getString('selectedServers') ?? 'Automatic';
-      selectedServerLogo =
-          _prefs.getString('selectedServerLogos') ?? 'assets/lottie/auto.json';
-    });
-  }
-
-  Future<void> _saveServerSelection(String server, String logoPath) async {
-    await _prefs.setString('selectedServers', server);
-    await _prefs.setString('selectedServerLogos', logoPath);
-    setState(() {
-      selectedServer = server;
-      selectedServerLogo = logoPath;
-    });
-  }
-
-  Future<List<String>> getDeviceArchitecture() async {
-    DeviceInfoPlugin deviceInfo = DeviceInfoPlugin();
-    AndroidDeviceInfo androidInfo = await deviceInfo.androidInfo;
-    return androidInfo.supportedAbis;
-  }
-
-  void getVersionName() async {
-    PackageInfo packageInfo = await PackageInfo.fromPlatform();
-    setState(() {
-      versionName = packageInfo.version;
-    });
-  }
-
-  Future<void> getDomain() async {
-    try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      setState(() {
-        isLoading = true;
-        blockedApps = prefs.getStringList('blockedApps') ?? [];
-      });
-      final response = await httpClient.get('').timeout(
-        Duration(seconds: 8),
-        onTimeout: () {
-          throw TimeoutException(context.tr('error_timeout'));
-        },
-      );
-      domainName = response.data;
-      checkUpdate();
-    } on TimeoutException catch (e) {
-      if (mounted) {
-        setState(() {
-          isLoading = false;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              e.message!,
-            ),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          isLoading = false;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(context.tr('error_domain')),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    }
-  }
-
-  String decrypt(String secureData, String x1, String x2, String key) {
-    final encryptedData = {
-      'ciphertext': secureData, // secure
-      'nonce': x1, // x1
-      'tag': x2 // x2
-    };
-    final savedKey = key;
-    try {
-      final decrypted = Decryptor.decryptChaCha20(encryptedData, savedKey);
-      return decrypted.toString();
-    } catch (e) {
-      return 'Error during decryption: $e';
-    }
-  }
-
-  void checkUpdate() async {
-    try {
-      final serverParam = getServerParam();
-
-      String userKey = await storage.read(key: 'user') ?? '';
-      if (userKey == '') {
-        final response = await Dio()
-            .get(
-          "https://$domainName/api/firebase/init/android",
-          options: Options(
-            headers: {
-              'X-Content-Type-Options': 'nosniff',
-            },
-          ),
-        )
-            .timeout(
-          Duration(seconds: 8),
-          onTimeout: () {
-            throw TimeoutException(context.tr('error_timeout'));
-          },
-        );
-        final dataJson = response.data;
-        final key = dataJson['key'];
-        userKey = key;
-        await storage.write(key: 'user', value: key);
-      } else {
-        userKey = await storage.read(key: 'user') ?? '';
-      }
-
-      final response = await Dio()
-          .get(
-        "https://$domainName/api/firebase/init/data/$userKey",
-        options: Options(
-          headers: {
-            'X-Content-Type-Options': 'nosniff',
-          },
-        ),
-      )
-          .timeout(
-        Duration(seconds: 8),
-        onTimeout: () {
-          throw TimeoutException(context.tr('error_timeout'));
-        },
-      );
-      if (response.data['status'] == true) {
-        final dataJson = response.data;
-        final secureData = dataJson['data']['secure'];
-        final x1 = dataJson['data']['x1'];
-        final x2 = dataJson['data']['x2'];
-        final version = dataJson['version'];
-        final updateUrl = dataJson['updated_url'];
-
-        final serverEncode = decrypt(secureData, x1, x2, userKey);
-
-        List<String> servers = LineSplitter.split(serverEncode).toList();
-
-        if (version == versionName) {
-          await connect(servers);
-        } else {
-          if (updateUrl.isNotEmpty) {
-            AwesomeDialog(
-              context: context,
-              dialogType: DialogType.warning,
-              title: context.tr('update_title'),
-              desc: context.tr('update_description'),
-              dialogBackgroundColor: Colors.white,
-              btnCancelOnPress: () {},
-              btnOkOnPress: () async {
-                await launchUrl(Uri.parse(utf8.decode(base64Decode(updateUrl))),
-                    mode: LaunchMode.externalApplication);
-              },
-              btnOkText: context.tr('download'),
-              btnCancelText: context.tr('close'),
-              buttonsTextStyle: TextStyle(
-                  fontFamily: 'sm', color: Colors.white, fontSize: 14),
-              titleTextStyle: TextStyle(
-                  fontFamily: 'sb', color: Colors.black, fontSize: 16),
-              descTextStyle: TextStyle(
-                  fontFamily: 'sm', color: Colors.black, fontSize: 14),
-            )..show();
-          } else {
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(
-                    context.tr('update_install'),
-                  ),
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
-            }
-          }
-        }
-      } else {
-        if (mounted) {
-          setState(() {
-            isLoading = false;
-          });
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                context.tr('request_limit'),
-                style: TextStyle(
-                  fontFamily: 'GM',
-                ),
-              ),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-      }
-    } on TimeoutException catch (e) {
-      if (mounted) {
-        setState(() {
-          isLoading = false;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              e.message!,
-            ),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              context.tr('error_get_version'),
-            ),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    } finally {
-      setState(() {
-        isLoading = false;
-      });
-    }
-  }
-
-  Future<void> connect(List<String> serverList) async {
-    if (serverList.isEmpty) {
-      // سرور یافت نشد
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              context.tr('error_no_server_connected'),
-            ),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-      setState(() {
-        isLoading = false;
-      });
-      return;
-    }
-
-    setState(() {
-      isLoading = true;
-    });
-
-    List<String> list = [];
-
-    serverList.forEach((element) {
-      final V2RayURL v2rayURL = FlutterV2ray.parseFromURL(element);
-
-      list.add(v2rayURL.getFullConfiguration());
-    });
-
-    Map<String, dynamic> getAllDelay =
-        jsonDecode(await flutterV2ray.getAllServerDelay(configs: list));
-
-    list.clear();
-
-    int minPing = 99999999;
-    String bestConfig = '';
-
-    getAllDelay.forEach(
-      (key, value) {
-        if (value < minPing && value != -1) {
-          setState(() {
-            bestConfig = key;
-            minPing = value;
-          });
-        }
-      },
-    );
-
-    if (bestConfig.isNotEmpty) {
-      if (await flutterV2ray.requestPermission()) {
-        flutterV2ray.startV2Ray(
-          remark: context.tr('app_title'),
-          config: bestConfig,
-          proxyOnly: false,
-          bypassSubnets: null,
-          notificationDisconnectButtonName: context.tr('disconnect_btn'),
-          blockedApps: blockedApps,
-        );
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(context.tr('error_permission')),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-      }
-    } else {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              context.tr('error_no_server_connected'),
-            ),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    }
-    Future.delayed(
-      Duration(seconds: 1),
-      () {
-        delay();
-      },
-    );
-    setState(() {
-      isLoading = false;
-    });
-  }
-
-  void delay() async {
-    if (v2rayStatus.value.state == 'CONNECTED') {
-      connectedServerDelay = await flutterV2ray.getConnectedServerDelay();
-      setState(() {
-        isFetchingPing = true;
-      });
-    }
-    if (!mounted) return;
   }
 }

@@ -1,4 +1,4 @@
-package cloud.begzar.begzar
+package com.sahandsoft.vpn
 
 import io.flutter.embedding.android.FlutterActivity
 

@@ -1,26 +1,27 @@
 <div align="center">
 
-<img width="5760" height="3240" alt="Thumbnail (6)" src="https://github.com/user-attachments/assets/37822da8-acba-4088-aa98-7ba68b30f928" />
+<img src="assets/images/sahand_icon.png" width="128" alt="SahandSoft logo" />
 
+# 🛡️ SahandSoft | Secure V2Ray VPN Client
 
-# 🐦 Begzar | Free & Secure Internet Access
-
-**🌐 Free, secure, and reliable access to the internet**
+**Modern, minimal, fully redesigned VPN client for Android**
 
 🇮🇷 **[فارسی](README.fa.md)** · 🇬🇧 **English**
 
-[![Android](https://img.shields.io/badge/Platform-Android-green)](https://github.com/Begzar/BegzarApp/releases/latest)
-[![Telegram](https://img.shields.io/badge/Telegram-@BegzarVPN-blue)](https://t.me/BegzarVPN)
+Developer: **Daniel Afshari** · Telegram: **[@SahandSoft](https://t.me/SahandSoft)**
 
 </div>
 
 ---
 
-## 📖 About Begzar
+## 📖 About
 
-**Begzar** is a VPN service built around simplicity, security, and reliability. The **Android** 📱 version is currently available to users.
-
-Our goal is to provide dependable internet access without technical complexity — fast connections, a clean interface, and automatic server updates are at the core of the experience.
+**SahandSoft** is a redesigned Android VPN client built on the Xray core
+(`flutter_v2ray`). This edition is a **complete UI/UX rebuild** of the
+open-source [BegzarApp](https://github.com/Begzar/BegzarApp) project (MIT):
+new brand identity, new design system, Persian-first localization with full
+RTL, light & dark Material 3 themes, and a new user-managed configuration
+layer.
 
 ---
 
@@ -28,88 +29,123 @@ Our goal is to provide dependable internet access without technical complexity �
 
 | Feature | Description |
 |---|---|
-| 🚀 Fast connection | Connect in just a few steps, automatically |
-| 🔒 Security | Advanced encryption protocols |
-| 📱 User interface | Simple, modern, mobile-optimized design |
-| ⚡ Resource efficiency | Balanced battery and device resource usage |
-| 🔄 Server updates | Automatic refresh of active server lists |
-| 🆓 Free servers | Free access to the service for all users |
+| 🎨 **SahandSoft Design System** | Centralized design tokens, soft cards, unified iconography, calm motion |
+| 🌗 **Light & Dark themes** | Material 3, follows the system or manual override |
+| 🇮🇷 **Persian first** | Default language is Persian with full RTL; English / 中文 / Русский included |
+| ⚡ **Real connection states** | Disconnected / Connecting / Connected / Disconnecting — mirrors the actual VPN service |
+| 🧩 **Your configs, your device** | Add `vmess` / `vless` / `trojan` / `ss` / `hysteria2` links manually or import a standard V2Ray subscription URL |
+| 📊 **Honest stats** | Real download / upload speed, total usage, session duration, measured server delay, public IP check (masked) |
+| 🚀 **Automatic best-server** | Measures real delays of all profiles and connects to the fastest one |
+| 🚫 **Excluded apps** | Pick apps that bypass the tunnel (persisted and applied to the engine) |
+| 🔒 **Root-device guard** | Refuses to run on rooted devices (upstream security policy) |
 
 ---
 
 ## 📲 Installation (Android)
 
-1️⃣ Download the latest version from [📥 Releases](https://github.com/Begzar/BegzarApp/releases/latest).  
-2️⃣ Install the APK on your device.  
-3️⃣ Launch the app and connect.
+### Option 1 — Download a ready APK from GitHub Actions
+1. Open this repository → **Actions** tab → **Build APK (SahandSoft)**.
+2. Open the latest successful run → scroll to **Artifacts** → download **SahandSoft-APKs**.
+3. Unzip and install `SahandSoft-universal.apk` (or the APK matching your CPU: `arm64-v8a` for most modern phones).
+
+### Option 2 — Build it yourself
+```bash
+flutter pub get
+flutter build apk --release
+# build/app/outputs/flutter-apk/app-release.apk
+```
+
+> ℹ️ Release signing uses a keystore provided through repository secrets
+> (`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`).
+> For your own production builds, create a private keystore and keep it out
+> of version control.
 
 ---
 
-## 💎 Premium (v6.4.0)
+## 🧪 Quality gates
 
-Starting with **version 6.4.0**, a **Premium** plan has been added to Begzar.
+Every push to `main` runs on GitHub Actions:
 
-This plan was introduced to **raise capital** 💰 and **cover infrastructure and server costs** 🖥️, helping us keep the service more stable, faster, and higher quality.
-
-### 📌 Important notes
-
-- 🛡️ **No user data is collected.** Your privacy is our priority.
-- 🆓 **Free servers remain active** — the free tier has not been removed.
-- ✨ Premium offers additional benefits; subscribing is entirely **optional**.
-
-To support the project and subscribe to Premium, visit our official website:
-
-👉 **[begzar.app](https://begzar.app)**
+- `flutter pub get`
+- `dart run flutter_launcher_icons`
+- `flutter analyze`
+- `flutter test`
+- `flutter build apk --release`
 
 ---
 
-## ⚠️ Source Code Policy (v5.5.0 and above)
+## 🏗️ Project structure
 
-From **version 5.5.0** onward, Begzar is developed and distributed as **Closed Source** 🔒.
-
-This decision was made for **security** reasons. Unfortunately, some individuals were **misusing** the project's open-source code, putting user security and service stability at risk.
-
-Older open-source releases remain available in the repository; newer versions are published under this policy.
+```
+lib/
+├── main.dart                  # app entry, theming, root shell (nav bar / rail)
+├── theme/
+│   ├── app_tokens.dart        # design tokens (colors, radii, spacing, motion)
+│   └── app_theme.dart         # Material 3 light/dark ThemeData + palette
+├── core/
+│   ├── models.dart            # VpnProfile + URI/subscription helpers (pure Dart)
+│   ├── config_repository.dart # profiles, subscription import, prefs
+│   └── v2ray_service.dart     # flutter_v2ray wrapper (engine layer)
+├── screens/                   # home, servers, settings, language, exclusions, about
+└── widgets/                   # connection button, stats, sheets, shared components
+```
 
 ---
 
-## 🛠️ Tech Stack
+## ⚠️ Known limitations & transparency notes
 
-- 🖥️ **Flutter** — Mobile application
-- ⚡ **Golang** — Core services
-- 🌐 **Vue.js** — Website
-- 🛡️ **Laravel** — Backend & API
+- **Upstream backend is not part of the public source.** The original
+  BegzarApp repository ships its HTTP client with an *empty base URL* — the
+  server that provides free configs was intentionally removed from the open
+  source. Consequently, the original "fetch config from Begzar's servers"
+  flow cannot work from the public code. SahandSoft replaces it with an
+  equivalent, fully functional layer: **you provide the configs** (manual
+  links or subscription URL) and the app connects using the same Xray engine
+  exactly as before. No mock data is used anywhere.
+- **Update-check flow removed.** The upstream update dialog pointed at
+  Begzar's private backend and is not applicable to this edition.
+- **Fonts.** The bundled Gilroy and Dana fonts are commercial typefaces and
+  were removed from this redistribution for licensing safety. The app now
+  uses **Shabnam** (SIL OFL 1.1).
+- **License note.** The upstream repo publishes this code tree under the MIT
+  license (see `LICENSE`), while its README states that versions ≥ 5.5.0 are
+  developed closed-source. This edition is based on the tree that is
+  published under MIT, keeps the original copyright notice, and documents
+  all modifications.
+- **Testing scope.** CI runs analyze, unit/widget tests and a release build.
+  Real-device VPN behavior (permission dialog, tunnel lifecycle) must be
+  verified on hardware — no emulator/device is attached to the build
+  environment.
+
+---
+
+## 🔐 Privacy
+
+No analytics, no tracking, no data collection. See
+[privacy.md](privacy.md). Configs and preferences stay on the device.
 
 ---
 
 ## 📜 License
 
-📄 Earlier open-source releases are licensed under [MIT](LICENSE). Versions 5.5.0 and above are proprietary and closed source.
-
----
-
-## 💖 Support the Project
-
-If you use Begzar, you can support us by:
-
-- ⭐ Starring this repository
-- 💎 Subscribing to Premium at [begzar.app](https://begzar.app)
-- 📢 Recommending Begzar to others
+This project is a derivative of [BegzarApp](https://github.com/Begzar/BegzarApp)
+and is distributed under the **MIT License** — the original copyright notice
+is preserved in [`LICENSE`](LICENSE). Fonts: Shabnam (SIL OFL 1.1).
 
 ---
 
 ## 📞 Contact
 
-| Channel | Address |
+| | |
 |---|---|
-| 🌐 Website | [begzar.app](https://begzar.app) |
-| 📧 ایمیل | [support@begzar.app](mailto:support@begzar.app) |
-| 📢 Telegram | [@BegzarVPN](https://t.me/BegzarVPN) |
+| 👤 Developer | **Daniel Afshari** |
+| 📢 Telegram | [@SahandSoft](https://t.me/SahandSoft) |
+| 🧱 Upstream project | [BegzarApp](https://github.com/Begzar/BegzarApp) (MIT) |
 
 ---
 
 <div align="center">
 
-🚀 **Begzar — Borderless internet, with security and respect for your privacy** 🚀
+🛡️ **SahandSoft — a calm, honest VPN client** 🛡️
 
 </div>

@@ -1,192 +1,136 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_v2ray/flutter_v2ray.dart';
 import 'package:iconsax/iconsax.dart';
-import 'dart:math';
-import 'dart:io';
-import 'package:dio/dio.dart';
-import 'package:dio/io.dart';
 
-class NavigationRailWidget extends StatefulWidget {
-  final int selectedIndex;
-  final ValueNotifier<V2RayStatus> singStatus;
-  final Function(int) onDestinationSelected;
+import '../theme/app_tokens.dart';
+import 'common/sahand_components.dart';
 
-  NavigationRailWidget({
-    Key? key,
+/// ---------------------------------------------------------------------------
+/// NavigationRailWidget — side navigation for wide screens (tablet/desktop).
+/// Real localized labels are shown next to the icons.
+/// ---------------------------------------------------------------------------
+class NavigationRailWidget extends StatelessWidget {
+  const NavigationRailWidget({
+    super.key,
     required this.selectedIndex,
-    required this.singStatus,
     required this.onDestinationSelected,
-  }) : super(key: key);
+  });
 
-  @override
-  State<NavigationRailWidget> createState() => _NavigationRailWidgetState();
-}
-
-class _NavigationRailWidgetState extends State<NavigationRailWidget> {
-  String? ip;
-  String? countryCode;
-
-  Future<Map<String, String>> getIpApi() async {
-    try {
-      final dio = Dio();
-      dio.httpClientAdapter = IOHttpClientAdapter()
-        ..createHttpClient = () {
-          final client = HttpClient();
-          client.findProxy = (uri) {
-            return 'PROXY 127.0.0.1:8569';
-          };
-          return client;
-        };
-
-      final response = await dio.get(
-        'https://freeipapi.com/api/json',
-        options: Options(
-          followRedirects: true,
-          validateStatus: (status) => true,
-          receiveTimeout: const Duration(seconds: 10),
-        ),
-      );
-
-      if (response.statusCode == 200) {
-        final data = response.data;
-        if (data != null && data is Map) {
-          String ip = data['ipAddress'] ?? 'نامشخص';
-
-          if (ip.contains('.')) {
-            final parts = ip.split('.');
-            if (parts.length == 4) {
-              ip = '${parts[0]}.*.*.${parts[3]}';
-            }
-          } else if (ip.contains(':')) {
-            final parts = ip.split(':');
-            if (parts.length > 4) {
-              ip = '${parts[0]}:${parts[1]}:****:${parts.last}';
-            }
-          }
-
-          return {'countryCode': data['countryCode'] ?? 'Unknown', 'ip': ip};
-        }
-      }
-      return {'countryCode': 'IR', 'ip': 'Unknown'};
-    } catch (e) {
-      return {'countryCode': 'IR', 'ip': 'Error'};
-    }
-  }
-
-  String countryCodeToFlagEmoji(String countryCode) {
-    countryCode = countryCode.toUpperCase();
-    return countryCode.codeUnits
-        .map((codeUnit) => String.fromCharCode(0x1F1E6 + codeUnit - 0x41))
-        .join();
-  }
-
-  String formatBytes(int bytes) {
-    if (bytes <= 0) return '0B';
-    const suffixes = ['B', 'KB', 'MB', 'GB'];
-    var i = (log(bytes) / log(1024)).floor();
-    return '${(bytes / pow(1024, i)).toStringAsFixed(2)}${suffixes[i]}';
-  }
-
-  String formatSpeedBytes(int bytes) {
-    if (bytes <= 0) return '0B/s';
-    const suffixes = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
-    var i = (log(bytes) / log(1024)).floor();
-    return '${(bytes / pow(1024, i)).toStringAsFixed(2)}${suffixes[i]}';
-  }
+  final int selectedIndex;
+  final Function(int) onDestinationSelected;
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
-    final isExtraWideScreen = size.width > 12000;
-
     return Container(
-      width: isExtraWideScreen ? 180 : 88,
+      width: 240,
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.xl,
+      ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const SizedBox(height: 50),
-          Text(
-            context.tr('app_title'),
-            style: TextStyle(fontFamily: 'sb', fontSize: 20),
+          Padding(
+            padding:
+                const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+            child: Row(
+              children: [
+                const SahandLogo(size: 40),
+                const SizedBox(width: AppSpacing.md),
+                Expanded(
+                  child: Text(
+                    context.tr('app_title'),
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleLarge
+                        ?.copyWith(fontWeight: FontWeight.w700),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xl),
+          _NavItem(
+            icon: Iconsax.home,
+            label: context.tr('nav_home'),
+            selected: selectedIndex == 0,
+            onTap: () => onDestinationSelected(0),
+          ),
+          _NavItem(
+            icon: Iconsax.setting,
+            label: context.tr('nav_servers'),
+            selected: selectedIndex == 1,
+            onTap: () => onDestinationSelected(1),
+          ),
+          _NavItem(
+            icon: Iconsax.setting_2,
+            label: context.tr('setting'),
+            selected: selectedIndex == 2,
+            onTap: () => onDestinationSelected(2),
+          ),
+          _NavItem(
+            icon: Iconsax.info_circle,
+            label: context.tr('about'),
+            selected: selectedIndex == 3,
+            onTap: () => onDestinationSelected(3),
           ),
           const Spacer(),
-          _buildNavItems(isExtraWideScreen),
-          // const SizedBox(height: 16),
         ],
       ),
     );
   }
+}
 
-  Widget _buildNavItems(bool isExtraWideScreen) {
-    return Column(
-      children: [
-        _buildNavItem(
-          Iconsax.setting,
-          '',
-          0,
-          isExtraWideScreen,
-        ),
-        _buildNavItem(
-          Iconsax.home,
-          '',
-          1,
-          isExtraWideScreen,
-        ),
-        _buildNavItem(
-          Iconsax.info_circle,
-          '',
-          2,
-          isExtraWideScreen,
-        ),
-      ],
-    );
-  }
+class _NavItem extends StatelessWidget {
+  const _NavItem({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
 
-  Widget _buildNavItem(
-    IconData icon,
-    String label,
-    int index,
-    bool showLabel,
-  ) {
-    final isSelected = widget.selectedIndex == index;
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
 
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 8),
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final Color accent = theme.brightness == Brightness.dark
+        ? AppColors.brandBright
+        : AppColors.brandDeep;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
       child: Material(
-        color: Colors.transparent,
+        color: selected
+            ? accent.withValues(alpha: 0.12)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(AppRadius.md),
         child: InkWell(
-          onTap: () => widget.onDestinationSelected(index),
-          borderRadius: BorderRadius.circular(12),
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(AppRadius.md),
           child: Container(
-            width: showLabel ? 150 : 60,
             padding: const EdgeInsets.symmetric(
-              vertical: 12,
-              horizontal: 16,
-            ),
-            decoration: BoxDecoration(
-              color: isSelected ? Colors.grey[800] : Colors.transparent,
-              borderRadius: BorderRadius.circular(12),
+              horizontal: AppSpacing.lg,
+              vertical: 14,
             ),
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(
                   icon,
-                  color: isSelected ? Colors.white : Colors.grey[600],
-                  size: 24,
+                  size: 22,
+                  color: selected ? accent : theme.colorScheme.outline,
                 ),
-                if (showLabel) ...[
-                  const SizedBox(width: 8),
-                  Text(
-                    label,
-                    style: TextStyle(
-                      color: isSelected ? Colors.white : Colors.grey[600],
-                      fontSize: 14,
-                      fontFamily: 'sm',
-                    ),
+                const SizedBox(width: AppSpacing.md),
+                Text(
+                  label,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: selected ? accent : null,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                   ),
-                ],
+                ),
               ],
             ),
           ),

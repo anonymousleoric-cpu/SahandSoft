@@ -1,269 +1,321 @@
-import 'package:flutter/material.dart';
 import 'package:easy_localization/easy_localization.dart';
-import 'package:flutter/services.dart';
-import 'package:url_launcher/url_launcher.dart';
-import 'package:package_info_plus/package_info_plus.dart';
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
 import 'package:iconsax/iconsax.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../core/config_repository.dart';
+import '../core/v2ray_service.dart';
+import '../theme/app_theme.dart';
+import '../theme/app_tokens.dart';
+import '../widgets/common/sahand_components.dart';
+
+/// ---------------------------------------------------------------------------
+/// AboutScreen — SahandSoft identity + builder credit + legal attribution.
+/// ---------------------------------------------------------------------------
 class AboutScreen extends StatefulWidget {
-  AboutScreen({super.key});
+  const AboutScreen({
+    super.key,
+    required this.service,
+    required this.repository,
+  });
+
+  final V2RayService service;
+  final ConfigRepository repository;
+
+  static const String kTelegramDevUrl = 'https://t.me/SahandSoft';
+  static const String kUpstreamRepoUrl =
+      'https://github.com/Begzar/BegzarApp';
 
   @override
   State<AboutScreen> createState() => _AboutScreenState();
 }
 
 class _AboutScreenState extends State<AboutScreen> {
-  String? version;
+  String? _version;
+  String? _coreVersion;
 
   @override
   void initState() {
     super.initState();
-    _getVersion();
+    _loadVersions();
   }
 
-  Future<void> _getVersion() async {
-    final packageInfo = await PackageInfo.fromPlatform();
+  Future<void> _loadVersions() async {
+    final PackageInfo info = await PackageInfo.fromPlatform();
+    final String? core = await widget.service.coreVersion();
+    if (!mounted) return;
     setState(() {
-      version = packageInfo.version;
+      _version = info.version;
+      _coreVersion = core;
     });
+  }
+
+  Future<void> _launch(String url) async {
+    final Uri uri = Uri.parse(url);
+    // externalApplication: opens Telegram (if installed) or a browser.
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(context.tr('link_open_failed')),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final SahandPalette palette = SahandPalette.of(context);
     return Scaffold(
-      backgroundColor: const Color(0xff192028),
       appBar: AppBar(
-        backgroundColor: const Color(0xff192028),
-        elevation: 0,
         title: Text(
           context.tr('about'),
-          style: const TextStyle(
-            fontFamily: 'sb',
-            fontSize: 18,
-          ),
+          style: Theme.of(context)
+              .textTheme
+              .titleLarge
+              ?.copyWith(fontWeight: FontWeight.w700),
         ),
-        centerTitle: true,
       ),
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24.0),
-          child: Column(
-            children: [
-              const SizedBox(height: 40),
-              // Logo Container with Animation
-              TweenAnimationBuilder(
-                duration: const Duration(seconds: 1),
-                tween: Tween<double>(begin: 0, end: 1),
-                builder: (context, double value, child) {
-                  return Transform.scale(
-                    scale: value,
-                    child: Container(
-                      width: 120,
-                      height: 120,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF2A2A2A),
-                        borderRadius: BorderRadius.circular(30),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.2),
-                            blurRadius: 15,
-                            offset: const Offset(0, 5),
-                          ),
-                        ],
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(20),
-                        child: Image.asset(
-                          'assets/images/logo.png',
-                          width: 80,
-                          height: 80,
-                        ),
-                      ),
-                    ),
-                  );
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(AppSpacing.xl),
+          children: [
+            // ---- Brand ---------------------------------------------------
+            Center(
+              child: TweenAnimationBuilder<double>(
+                duration: AppDurations.slow,
+                tween: Tween<double>(begin: 0.9, end: 1),
+                curve: Curves.easeOutCubic,
+                builder: (BuildContext context, double value, Widget? child) {
+                  return Transform.scale(scale: value, child: child);
                 },
+                child: const SahandLogo(size: 108),
               ),
-              const SizedBox(height: 24),
-
-              // App Name with Animation
-              TweenAnimationBuilder(
-                duration: const Duration(milliseconds: 800),
-                tween: Tween<double>(begin: 0, end: 1),
-                builder: (context, double value, child) {
-                  return Opacity(
-                    opacity: value,
-                    child: Text(
-                      context.tr('app_title'),
-                      style: const TextStyle(
-                        fontSize: 32,
-                        fontFamily: 'sb',
-                        color: Colors.white,
-                      ),
-                    ),
-                  );
-                },
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            Center(
+              child: Text(
+                context.tr('app_title'),
+                style: Theme.of(context)
+                    .textTheme
+                    .headlineSmall
+                    ?.copyWith(fontWeight: FontWeight.w700),
               ),
-              const SizedBox(height: 10),
-              if (version != null)
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      context.tr('version_title'),
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: Colors.grey[400],
-                      ),
-                    ),
-                    Text(
-                      ' : $version',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontFamily: 'GM',
-                        color: Colors.grey[400],
-                      ),
-                    ),
-                  ],
-                ),
-              const SizedBox(height: 30),
-
-              // Contact Cards
-              _buildContactCard(
-                icon: Iconsax.wallet,
-                title: 'TON Wallet',
-                onTap: () {
-                  Clipboard.setData(const ClipboardData(text: "UQDrQ59AyNvwH96R7wHl8-VqVFhWqoliujMpelbs2aR-LWr1"))
-                      .then(
-                    (_) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            context.tr('wallet_address_copied'),
-                          ),
-                        ),
-                      );
-                    },
-                  );
-                },
-              ),
-              _buildContactCard(
-                icon: Iconsax.message,
-                title: context.tr('email'),
-                onTap: () async {
-                  final Uri emailLaunchUri = Uri(
-                    scheme: 'mailto',
-                    path: 'info@begzar.xyz',
-                  );
-                  await launchUrl(emailLaunchUri);
-                },
-              ),
-              _buildContactCard(
-                icon: Iconsax.message_programming,
-                title: 'Github',
-                onTap: () async {
-                  await launchUrl(
-                      Uri.parse('https://github.com/Begzar/BegzarApp'),
-                      mode: LaunchMode.externalApplication);
-                },
-              ),
-              _buildContactCard(
-                icon: Iconsax.message_circle,
-                title: context.tr('telegram_channel'),
-                onTap: () async {
-                  await launchUrl(Uri.parse('https://t.me/BegzarVPN'),
-                      mode: LaunchMode.externalApplication);
-                },
-              ),
-
-              const SizedBox(height: 40),
-
-              // Description
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF2A2A2A),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Colors.grey.withOpacity(0.1)),
-                ),
-                child: Text(
-                  context.tr('about_description'),
-                  style: TextStyle(
-                    fontSize: 14,
-                    height: 1.5,
-                    fontFamily: 'sm',
-                    color: Colors.grey[300],
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-
-              const SizedBox(height: 24),
-              Text(
-                context.tr('copyright'),
-                style: TextStyle(
-                  fontSize: 12,
-                  fontFamily: 'GM',
-                  color: Colors.grey[600],
-                ),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Center(
+              child: Text(
+                context.tr('about_tagline'),
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: palette.muted),
                 textAlign: TextAlign.center,
               ),
-              const SizedBox(height: 24),
-            ],
-          ),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Center(
+              child: StatusPill(
+                label: context.tr(
+                  'version_with_value',
+                  args: <String>[_version ?? '—'],
+                ),
+                color: palette.primary,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.xl),
+
+            // ---- Developer credit (exact required text) -------------------
+            SahandCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      IconBadge(
+                        icon: Iconsax.profile_tick,
+                        color: palette.primary,
+                      ),
+                      const SizedBox(width: AppSpacing.md),
+                      Text(
+                        context.tr('developer_section'),
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  Text.rich(
+                    TextSpan(
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodyLarge
+                          ?.copyWith(height: 1.9),
+                      children: <InlineSpan>[
+                        TextSpan(text: '${context.tr('developer_line')} '),
+                        TextSpan(
+                          text: context.tr('developer_telegram_name'),
+                          style: TextStyle(
+                            color: palette.primary,
+                            fontWeight: FontWeight.w700,
+                            decoration: TextDecoration.underline,
+                            decorationColor: palette.primary,
+                          ),
+                          recognizer: TapGestureRecognizer()
+                            ..onTap = () =>
+                                _launch(AboutScreen.kTelegramDevUrl),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  OutlinedButton.icon(
+                    onPressed: () => _launch(AboutScreen.kTelegramDevUrl),
+                    icon: const Icon(Iconsax.send_1, size: 18),
+                    label: Text(context.tr('developer_telegram_name')),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: AppSpacing.md),
+
+            // ---- Technical info ------------------------------------------
+            SahandCard(
+              child: Column(
+                children: [
+                  _InfoRow(
+                    icon: Iconsax.setting_2,
+                    label: context.tr('engine_label'),
+                    value: 'flutter_v2ray',
+                  ),
+                  if (_coreVersion != null)
+                    _InfoRow(
+                      icon: Iconsax.cpu,
+                      label: context.tr('core_label'),
+                      value: _coreVersion!,
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: AppSpacing.md),
+
+            // ---- Open source attribution (legal requirement) --------------
+            SahandCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      IconBadge(
+                        icon: Iconsax.code,
+                        color: palette.muted,
+                      ),
+                      const SizedBox(width: AppSpacing.md),
+                      Expanded(
+                        child: Text(
+                          context.tr('open_source_section'),
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  Text(
+                    context.tr('attribution_body'),
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(height: 1.8),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () => _launch(
+                              AboutScreen.kUpstreamRepoUrl),
+                          icon: const Icon(Iconsax.code_1, size: 18),
+                          label: Text(context.tr('upstream_repo')),
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.md),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () => showLicensePage(
+                            context: context,
+                            applicationName: context.tr('app_title'),
+                            applicationVersion: _version,
+                          ),
+                          icon: const Icon(Iconsax.document, size: 18),
+                          label: Text(context.tr('licenses_link')),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: AppSpacing.xl),
+            Center(
+              child: Text(
+                context.tr('copyright_sahandsoft'),
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: palette.muted),
+                textAlign: TextAlign.center,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+          ],
         ),
       ),
     );
   }
+}
 
-  Widget _buildContactCard({
-    required IconData icon,
-    required String title,
-    required VoidCallback onTap,
-  }) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(16),
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
-            decoration: BoxDecoration(
-              color: const Color(0xFF2A2A2A),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.grey.withOpacity(0.1)),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF353535),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(icon, color: Colors.grey[400], size: 24),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Text(
-                    title,
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontFamily: 'sm',
-                      color: Colors.grey[300],
-                    ),
-                  ),
-                ),
-                Icon(
-                  Icons.arrow_forward_ios,
-                  color: Colors.grey[600],
-                  size: 16,
-                ),
-              ],
-            ),
+class _InfoRow extends StatelessWidget {
+  const _InfoRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final SahandPalette palette = SahandPalette.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: palette.muted),
+          const SizedBox(width: AppSpacing.md),
+          Text(
+            label,
+            style: Theme.of(context)
+                .textTheme
+                .bodyMedium
+                ?.copyWith(color: palette.muted),
           ),
-        ),
+          const Spacer(),
+          Text(
+            value,
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+        ],
       ),
     );
   }

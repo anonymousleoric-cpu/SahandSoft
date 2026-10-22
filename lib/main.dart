@@ -1,178 +1,294 @@
-import 'package:begzar/common/theme.dart';
-import 'package:begzar/screens/about_screen.dart';
-import 'package:begzar/screens/home_screen.dart';
-import 'package:begzar/screens/settings_screen.dart';
-import 'package:begzar/widgets/navigation_rail_widget.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_v2ray/model/v2ray_status.dart';
 import 'package:iconsax/iconsax.dart';
 import 'package:safe_device/safe_device.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import 'core/config_repository.dart';
+import 'core/v2ray_service.dart';
+import 'screens/about_screen.dart';
+import 'screens/home_screen.dart';
+import 'screens/servers_screen.dart';
+import 'screens/settings_screen.dart';
+import 'theme/app_theme.dart';
+import 'theme/app_tokens.dart';
+import 'widgets/navigation_rail_widget.dart';
+
+/// ---------------------------------------------------------------------------
+/// SahandSoft — secure VPN client (flutter_v2ray engine).
+/// ---------------------------------------------------------------------------
+/// Persian is the default language; English, Chinese and Russian are also
+/// supported. Light & dark themes follow the system unless overridden in
+/// Settings. The app refuses to run on jailbroken/rooted devices (same
+/// security policy as the upstream project).
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  bool isJailBroken = await SafeDevice.isJailBroken;
-  if (isJailBroken != true) {
+  final bool isJailBroken = await SafeDeviceGuard.isJailBroken;
+  if (!isJailBroken) {
     await EasyLocalization.ensureInitialized();
-    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
-      systemNavigationBarColor: ThemeColor.backgroundColor,
-      systemNavigationBarIconBrightness: Brightness.light,
-    ));
+    SystemChrome.setSystemUIOverlayStyle(
+      const SystemUiOverlayStyle(
+        systemNavigationBarColor: AppColors.darkBg,
+        systemNavigationBarIconBrightness: Brightness.light,
+      ),
+    );
     runApp(
       EasyLocalization(
-        supportedLocales: [
+        supportedLocales: const <Locale>[
+          Locale('fa', 'IR'), // default
           Locale('en', 'US'),
-          Locale('fa', 'IR'),
           Locale('zh', 'CN'),
           Locale('ru', 'RU'),
         ],
         path: 'assets/translations',
-        fallbackLocale: Locale('en', 'US'),
-        startLocale: Locale('en', 'US'),
+        fallbackLocale: const Locale('en', 'US'),
+        startLocale: const Locale('fa', 'IR'),
         saveLocale: true,
-        child: MyApp(),
+        child: const SahandSoftApp(),
       ),
     );
   }
 }
 
-class MyApp extends StatefulWidget {
-  MyApp({super.key});
-
-  @override
-  State<MyApp> createState() => _MyAppState();
+/// Isolated root-detection guard so the check stays swappable.
+class SafeDeviceGuard {
+  static Future<bool> get isJailBroken async {
+    try {
+      return await SafeDevice.isJailBroken;
+    } catch (_) {
+      return false;
+    }
+  }
 }
 
-class _MyAppState extends State<MyApp> {
+class SahandSoftApp extends StatefulWidget {
+  const SahandSoftApp({super.key});
+
+  @override
+  State<SahandSoftApp> createState() => _SahandSoftAppState();
+}
+
+class _SahandSoftAppState extends State<SahandSoftApp> {
+  /// App-wide theme mode; SettingsScreen writes into it and persists it.
+  final ValueNotifier<ThemeMode> _themeMode =
+      ValueNotifier<ThemeMode>(ThemeMode.system);
+
   @override
   void initState() {
     super.initState();
+    _loadThemeMode();
+  }
+
+  Future<void> _loadThemeMode() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final String saved = prefs.getString('themeMode') ?? 'system';
+    _themeMode.value = switch (saved) {
+      'light' => ThemeMode.light,
+      'dark' => ThemeMode.dark,
+      _ => ThemeMode.system,
+    };
+  }
+
+  @override
+  void dispose() {
+    _themeMode.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final defaultTextStyle =
-        TextStyle(fontFamily: 'sm', color: Color(0xffF7FAFF));
-    return MaterialApp(
-      title: 'Begzar VPN',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        textTheme: TextTheme(
-          titleLarge: defaultTextStyle,
-          titleMedium: defaultTextStyle,
-          titleSmall: defaultTextStyle,
-          bodyLarge: defaultTextStyle,
-          bodyMedium: defaultTextStyle,
-          bodySmall: defaultTextStyle,
-          labelLarge: defaultTextStyle,
-          labelMedium: defaultTextStyle,
-          labelSmall: defaultTextStyle,
-        ),
-        useMaterial3: true,
-        scaffoldBackgroundColor: ThemeColor.backgroundColor,
-        brightness: Brightness.dark,
-        inputDecorationTheme: InputDecorationTheme(
-          border: OutlineInputBorder(),
-        ),
-      ),
-      localizationsDelegates: context.localizationDelegates,
-      supportedLocales: context.supportedLocales,
-      locale: context.locale,
-      home: RootScreen(),
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: _themeMode,
+      builder: (BuildContext context, ThemeMode mode, _) {
+        return MaterialApp(
+          title: 'SahandSoft',
+          debugShowCheckedModeBanner: false,
+          theme: SahandTheme.light(),
+          darkTheme: SahandTheme.dark(),
+          themeMode: mode,
+          localizationsDelegates: context.localizationDelegates,
+          supportedLocales: context.supportedLocales,
+          locale: context.locale,
+          home: RootShell(themeMode: _themeMode),
+        );
+      },
     );
   }
 }
 
-class RootScreen extends StatefulWidget {
-  RootScreen({super.key});
+/// Bottom navigation (phones) / side rail (wide screens) shell.
+class RootShell extends StatefulWidget {
+  const RootShell({super.key, required this.themeMode});
+
+  final ValueNotifier<ThemeMode> themeMode;
 
   @override
-  State<RootScreen> createState() => _RootScreenState();
+  State<RootShell> createState() => _RootShellState();
 }
 
-class _RootScreenState extends State<RootScreen> {
-  int _selectedIndex = 1;
-  final v2rayStatus = ValueNotifier<V2RayStatus>(V2RayStatus());
-  late final List<Widget> _pages;
+class _RootShellState extends State<RootShell> {
+  int _selectedIndex = 0;
+  late final V2RayService _service;
+  final ConfigRepository _repository = ConfigRepository();
+  bool _serviceReady = false;
 
   @override
   void initState() {
     super.initState();
-    _pages = [SettingsWidget(), HomePage(), AboutScreen()];
+    _service = V2RayService();
+    _initService();
+  }
+
+  Future<void> _initService() async {
+    try {
+      await _service.initialize();
+      if (!mounted) return;
+      setState(() => _serviceReady = true);
+    } catch (e) {
+      debugPrint('V2Ray init failed: $e');
+      if (mounted) setState(() => _serviceReady = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _service.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final isWideScreen = MediaQuery.of(context).size.width > 600;
+    final bool isWideScreen = MediaQuery.sizeOf(context).width > 800;
+
+    if (!_serviceReady) {
+      return const _BootScreen();
+    }
+
+    final List<Widget> pages = <Widget>[
+      HomePage(service: _service, repository: _repository),
+      ServersScreen(
+        service: _service,
+        repository: _repository,
+      ),
+      SettingsScreen(
+        service: _service,
+        repository: _repository,
+        themeMode: widget.themeMode,
+      ),
+      AboutScreen(service: _service, repository: _repository),
+    ];
 
     return Scaffold(
       body: Row(
-        children: [
+        children: <Widget>[
           Expanded(
             child: IndexedStack(
               index: _selectedIndex,
-              children: _pages,
+              children: pages,
             ),
           ),
-          AnimatedSlide(
-            duration: Duration(milliseconds: 300),
-            curve: Curves.easeInOut,
-            offset: isWideScreen ? Offset.zero : Offset(1, 0),
-            child: AnimatedOpacity(
-              duration: Duration(milliseconds: 200),
-              opacity: isWideScreen ? 1 : 0,
-              child: isWideScreen
-                  ? NavigationRailWidget(
-                      selectedIndex: _selectedIndex,
-                      singStatus: v2rayStatus,
-                      onDestinationSelected: (index) {
-                        setState(() => _selectedIndex = index);
-                      },
-                    )
-                  : SizedBox(),
+          if (isWideScreen)
+            NavigationRailWidget(
+              selectedIndex: _selectedIndex,
+              onDestinationSelected: (int index) {
+                setState(() => _selectedIndex = index);
+              },
             ),
-          ),
         ],
       ),
-      bottomNavigationBar: !isWideScreen
-          ? Container(
-              decoration: BoxDecoration(
-                color: Color(0xff192028),
-                border: Border(
-                  top: BorderSide(
-                    color: Colors.grey.withOpacity(0.1),
-                    width: 1,
-                  ),
+      bottomNavigationBar: isWideScreen
+          ? null
+          : NavigationBar(
+              selectedIndex: _selectedIndex,
+              onDestinationSelected: (int index) {
+                setState(() => _selectedIndex = index);
+              },
+              destinations: <Widget>[
+                NavigationDestination(
+                  icon: Icon(Iconsax.home,
+                      color: _navIconColor(context, 0)),
+                  selectedIcon: Icon(Iconsax.home,
+                      color: _navSelectedColor(context)),
+                  label: context.tr('nav_home'),
                 ),
-              ),
-              child: NavigationBar(
-                backgroundColor: Color(0xff192028),
-                selectedIndex: _selectedIndex,
-                onDestinationSelected: (index) {
-                  setState(() => _selectedIndex = index);
-                },
-                destinations: [
-                  NavigationDestination(
-                    icon: Icon(Iconsax.setting, color: Colors.grey),
-                    selectedIcon: Icon(Iconsax.setting, color: Colors.white),
-                    label: '',
-                  ),
-                  NavigationDestination(
-                    icon: Icon(Iconsax.home, color: Colors.grey),
-                    selectedIcon: Icon(Iconsax.home, color: Colors.white),
-                    label: '',
-                  ),
-                  NavigationDestination(
-                    icon: Icon(Iconsax.info_circle, color: Colors.grey),
-                    selectedIcon:
-                        Icon(Iconsax.info_circle, color: Colors.white),
-                    label: '',
-                  ),
-                ],
-              ),
-            )
-          : null,
+                NavigationDestination(
+                  icon: Icon(Iconsax.setting,
+                      color: _navIconColor(context, 1)),
+                  selectedIcon: Icon(Iconsax.setting,
+                      color: _navSelectedColor(context)),
+                  label: context.tr('nav_servers'),
+                ),
+                NavigationDestination(
+                  icon: Icon(Iconsax.setting_2,
+                      color: _navIconColor(context, 2)),
+                  selectedIcon: Icon(Iconsax.setting_2,
+                      color: _navSelectedColor(context)),
+                  label: context.tr('setting'),
+                ),
+                NavigationDestination(
+                  icon: Icon(Iconsax.info_circle,
+                      color: _navIconColor(context, 3)),
+                  selectedIcon: Icon(Iconsax.info_circle,
+                      color: _navSelectedColor(context)),
+                  label: context.tr('about'),
+                ),
+              ],
+            ),
+    );
+  }
+
+  Color _navIconColor(BuildContext context, int index) {
+    if (_selectedIndex == index) return _navSelectedColor(context);
+    return SahandPalette.of(context).muted;
+  }
+
+  Color _navSelectedColor(BuildContext context) {
+    return Theme.of(context).brightness == Brightness.dark
+        ? AppColors.brandBright
+        : AppColors.brandDeep;
+  }
+}
+
+/// Minimal splash-style boot screen while the V2Ray core initializes.
+class _BootScreen extends StatelessWidget {
+  const _BootScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    final SahandPalette palette = SahandPalette.of(context);
+    return Scaffold(
+      backgroundColor:
+          Theme.of(context).brightness == Brightness.dark
+              ? AppColors.darkBg
+              : AppColors.lightBg,
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Image.asset(
+              'assets/images/sahand_logo.png',
+              width: 96,
+              height: 96,
+              fit: BoxFit.cover,
+            ),
+            const SizedBox(height: AppSpacing.xl),
+            const SizedBox(
+              width: 28,
+              height: 28,
+              child: CircularProgressIndicator(strokeWidth: 2.5),
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            Text(
+              context.tr('boot_loading'),
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: palette.muted),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
