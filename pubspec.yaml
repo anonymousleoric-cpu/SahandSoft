@@ -22,7 +22,7 @@ dependencies:
   flutter_launcher_icons: ^0.13.1
   package_info_plus: ^8.0.2
   shared_preferences: ^2.3.2
-  installed_apps: ^1.5.2
+  installed_apps: ^2.2.1
   easy_localization: ^3.0.7
   iconsax: ^0.0.8
   safe_device: ^1.1.9

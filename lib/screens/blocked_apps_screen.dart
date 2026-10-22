@@ -60,8 +60,13 @@ class _BlockedAppsScreenState extends State<BlockedAppsScreen> {
 
   Future<void> _loadApps() async {
     setState(() => _isLoading = true);
-    final List<AppInfo> installed =
-        await InstalledApps.getInstalledApps(!_isLoadSystemApps, true);
+    // installed_apps v2 API: named options. excludeNonLaunchableApps is
+    // disabled to preserve the upstream behavior of listing every app.
+    final List<AppInfo> installed = await InstalledApps.getInstalledApps(
+      excludeSystemApps: !_isLoadSystemApps,
+      excludeNonLaunchableApps: false,
+      withIcon: true,
+    );
     if (!mounted) return;
     setState(() {
       _apps = installed
